@@ -1,41 +1,62 @@
-name: CI
+name: Build UAssetGUI
+
 on:
+  workflow_dispatch:  # Allows manual triggering
   push:
-    branches:
-      - master
+    branches: [ main, master ]  # Auto-build on pushes to main branch
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-latest  # We need Windows for Visual Studio
     
-    env:
-      ACTIONS_ALLOW_UNSECURE_COMMANDS: true
-
     steps:
-    - name: Checkout
-      uses: actions/checkout@v2
+    - name: Checkout Repository
+      uses: actions/checkout@v3
       with:
-        fetch-depth: 0
-
-    - name: .NET Setup
-      uses: actions/setup-dotnet@v2
+        submodules: 'recursive'  # This pulls in UAssetAPI submodule
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
       with:
-        dotnet-version: '8.0.x'
-
-    - name: Fetch submodules
-      run: git submodule update --init --recursive
-
-    - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v1.1
-
-    - name: Setup NuGet
-      uses: NuGet/setup-nuget@v1.0.2
-
-    - name: Navigate to workspace
-      run: cd $GITHUB_WORKSPACE
-
-    - name: Restore packages
-      run: nuget restore UAssetGUI.sln
-
+        dotnet-version: '6.0.x'  # Choose appropriate .NET version
+        
+    - name: Restore dependencies
+      run: dotnet restore
+      
     - name: Build
-      run: msbuild UAssetGUI.sln /p:Configuration=Release
+      run: dotnet build --configuration Release --no-restore
+      
+    - name: Create Release Files
+      run: |
+        mkdir release
+        copy bin\Release\net472\*.* release\
+      shell: cmd
+        
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: UAssetGUI
+        path: release
+    - name: Zip Release Files
+      run: Compress-Archive -Path release\* -DestinationPath UAssetGUI.zip
+      
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: auto-build-${{ github.run_number }}
+        release_name: Automated Build ${{ github.run_number }}
+        draft: false
+        prerelease: true
+        
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./UAssetGUI.zip
+        asset_name: UAssetGUI.zip
+        asset_content_type: application/zip
